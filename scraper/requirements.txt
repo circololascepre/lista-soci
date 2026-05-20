@@ -1,4 +1,5 @@
 selenium
+undetected-chromedriver
 gspread
 oauth2client
 pandas

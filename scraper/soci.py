@@ -7,8 +7,7 @@ import tempfile
 import logging
 from datetime import datetime
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -36,15 +35,13 @@ META_SHEET = "Meta"
 COLUMNS    = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA"]
 
 
-def crea_driver(download_dir: str) -> webdriver.Chrome:
-    opts = Options()
+def crea_driver(download_dir: str) -> uc.Chrome:
+    opts = uc.ChromeOptions()
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-features=InsecureDownloadWarnings")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
     opts.add_experimental_option("prefs", {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
@@ -52,14 +49,15 @@ def crea_driver(download_dir: str) -> webdriver.Chrome:
         "safebrowsing.enabled": False,
     })
 
-    # Su GitHub Actions browser-actions/setup-chrome esporta CHROME_BIN
     chrome_bin = os.environ.get("CHROME_BIN")
     if chrome_bin:
-        opts.binary_location = chrome_bin
         log.info("Chrome binary: %s", chrome_bin)
 
-    # Selenium-manager (incluso in selenium >= 4.6) scarica chromedriver automaticamente
-    driver = webdriver.Chrome(options=opts)
+    driver = uc.Chrome(
+        options=opts,
+        browser_executable_path=chrome_bin if chrome_bin else None,
+        headless=False,
+    )
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {
         "behavior": "allow",
         "downloadPath": download_dir,
