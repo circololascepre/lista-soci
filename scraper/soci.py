@@ -38,7 +38,7 @@ COLUMNS    = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA
 
 def crea_driver(download_dir: str) -> webdriver.Chrome:
     opts = Options()
-    opts.add_argument("--headless=new")
+    opts.add_argument("--headless")
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
@@ -193,6 +193,9 @@ def scarica_soci() -> None:
         log.info("Login inviato. Attesa caricamento dashboard...")
         time.sleep(15)
         log.info("URL dopo login: %s", driver.current_url)
+        log.info("Titolo pagina dopo login: %s", driver.title)
+        driver.save_screenshot("/tmp/screenshot_dopo_login.png")
+        log.info("Screenshot post-login salvato.")
 
         log.info("Click su menu SOCI (ctl00_Mnu040)...")
         menu_soci = wait.until(EC.presence_of_element_located((By.ID, "ctl00_Mnu040")))

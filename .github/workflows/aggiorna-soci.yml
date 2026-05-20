@@ -45,10 +45,10 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python scraper/soci.py
 
-      - name: Upload screenshot in caso di errore
-        if: failure()
+      - name: Upload screenshot diagnostico
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshot-errore
-          path: /tmp/screenshot_errore.png
+          name: screenshots
+          path: /tmp/screenshot_*.png
           if-no-files-found: ignore
