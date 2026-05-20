@@ -14,6 +14,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Installa Xvfb e dipendenze display
+        run: sudo apt-get install -y xvfb
+
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
         id: setup-chrome
@@ -37,13 +40,17 @@ jobs:
       - name: Versione Chrome installata
         run: google-chrome --version || chromium-browser --version || echo "Chrome non trovato in PATH"
 
-      - name: Run scraper
+      - name: Run scraper (con display virtuale Xvfb)
         env:
           AICS_USERNAME: ${{ secrets.AICS_USERNAME }}
           AICS_PASSWORD: ${{ secrets.AICS_PASSWORD }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-        run: python scraper/soci.py
+          DISPLAY: ":99"
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          python scraper/soci.py
 
       - name: Upload screenshot diagnostico
         if: always()

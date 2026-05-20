@@ -38,7 +38,6 @@ COLUMNS    = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA
 
 def crea_driver(download_dir: str) -> webdriver.Chrome:
     opts = Options()
-    opts.add_argument("--headless=new")
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
