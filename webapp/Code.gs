@@ -1,6 +1,7 @@
 var SHEET_NAME = 'Lista Soci';
-var CACHE_KEY   = 'soci_data';
-var CACHE_TTL   = 300; // 5 minuti
+var META_SHEET = 'Meta';
+var CACHE_KEY  = 'soci_v2';
+var CACHE_TTL  = 300; // 5 minuti
 
 // ---------------------------------------------------------------------------
 // Entrypoint web app
@@ -43,7 +44,7 @@ function doGet(e) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper template (usato con <?!= include('Stylesheet') ?>)
+// Helper template
 // ---------------------------------------------------------------------------
 
 function include(filename) {
@@ -52,6 +53,7 @@ function include(filename) {
 
 // ---------------------------------------------------------------------------
 // Lettura soci con cache 5 minuti
+// Ritorna { soci: [...], aggiornato: "dd/MM/yyyy HH:mm" }
 // ---------------------------------------------------------------------------
 
 function getSoci() {
@@ -63,8 +65,20 @@ function getSoci() {
 
   var props         = PropertiesService.getScriptProperties();
   var spreadsheetId = props.getProperty('SPREADSHEET_ID');
-  var sheet         = SpreadsheetApp.openById(spreadsheetId).getSheetByName(SHEET_NAME);
+  var ss            = SpreadsheetApp.openById(spreadsheetId);
+  var sheet         = ss.getSheetByName(SHEET_NAME);
   var data          = sheet.getDataRange().getValues();
+
+  // Leggi timestamp dal foglio Meta (scritto dallo scraper Python)
+  var aggiornato = '';
+  try {
+    var metaSheet = ss.getSheetByName(META_SHEET);
+    if (metaSheet) {
+      aggiornato = String(metaSheet.getRange('A1').getValue() || '').trim();
+    }
+  } catch (e) {
+    Logger.log('Meta sheet non trovato: ' + e);
+  }
 
   var soci = [];
   for (var i = 1; i < data.length; i++) {
@@ -80,8 +94,9 @@ function getSoci() {
     });
   }
 
-  cache.put(CACHE_KEY, JSON.stringify(soci), CACHE_TTL);
-  return soci;
+  var result = { soci: soci, aggiornato: aggiornato };
+  cache.put(CACHE_KEY, JSON.stringify(result), CACHE_TTL);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +112,7 @@ function triggerAggiornamento() {
 
   try {
     var response = UrlFetchApp.fetch(url, {
-      method:           'POST',
+      method:             'POST',
       muteHttpExceptions: true,
       headers: {
         'Authorization':        'Bearer ' + token,
@@ -110,17 +125,77 @@ function triggerAggiornamento() {
 
     var code = response.getResponseCode();
     if (code === 204) {
-      return { ok: true, message: 'Aggiornamento avviato. I dati saranno disponibili tra qualche minuto.' };
+      return { ok: true, message: 'Workflow avviato.' };
     }
 
     var body = response.getContentText();
-    Logger.log('GitHub API error ' + code + ': ' + body);
-    return { ok: false, message: 'Errore GitHub (HTTP ' + code + '). Controlla il log.' };
+    Logger.log('GitHub dispatch error ' + code + ': ' + body);
+    return { ok: false, message: 'Errore GitHub (HTTP ' + code + '): ' + body };
 
   } catch (e) {
-    Logger.log('triggerAggiornamento exception: ' + e.toString());
+    Logger.log('triggerAggiornamento exception: ' + e);
     return { ok: false, message: 'Errore di rete: ' + e.toString() };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Polling stato workflow (chiamato dal client ogni 5s dopo il dispatch)
+// ---------------------------------------------------------------------------
+
+function getWorkflowStatus() {
+  var props    = PropertiesService.getScriptProperties();
+  var token    = props.getProperty('GITHUB_TOKEN');
+  var repo     = props.getProperty('GITHUB_REPO');
+  var workflow = props.getProperty('WORKFLOW_FILE');
+  var url      = 'https://api.github.com/repos/' + repo +
+                 '/actions/workflows/' + workflow +
+                 '/runs?per_page=1&event=workflow_dispatch';
+
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: {
+        'Authorization':        'Bearer ' + token,
+        'Accept':               'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    });
+
+    var code = resp.getResponseCode();
+    if (code !== 200) {
+      Logger.log('getWorkflowStatus HTTP ' + code + ': ' + resp.getContentText());
+      return { status: 'error', message: 'Errore GitHub API (HTTP ' + code + ').' };
+    }
+
+    var runs = JSON.parse(resp.getContentText()).workflow_runs;
+    if (!runs || runs.length === 0) {
+      return { status: 'queued', message: 'In attesa di avvio...' };
+    }
+
+    var run = runs[0];
+    return {
+      status:     run.status,
+      conclusion: run.conclusion,
+      runUrl:     run.html_url,
+      message:    messaggioStato_(run.status, run.conclusion)
+    };
+
+  } catch (e) {
+    Logger.log('getWorkflowStatus exception: ' + e);
+    return { status: 'error', message: 'Errore di rete: ' + e.toString() };
+  }
+}
+
+function messaggioStato_(status, conclusion) {
+  if (status === 'queued')      return 'In coda su GitHub...';
+  if (status === 'in_progress') return 'Scraper in esecuzione...';
+  if (status === 'completed') {
+    if (conclusion === 'success')   return 'Aggiornamento completato con successo!';
+    if (conclusion === 'failure')   return 'Il workflow è fallito. Vedi log su GitHub per i dettagli.';
+    if (conclusion === 'cancelled') return 'Workflow annullato.';
+    return 'Completato con esito: ' + conclusion;
+  }
+  return 'Stato: ' + status;
 }
 
 // ---------------------------------------------------------------------------

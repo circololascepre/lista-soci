@@ -22,6 +22,7 @@
           spellcheck="false"
         >
       </div>
+      <p id="ultimo-aggiornamento" class="ultimo-aggiornamento"></p>
       <div class="toolbar">
         <span id="contatore" class="contatore">Caricamento...</span>
         <button id="btn-aggiorna" class="btn-aggiorna" onclick="aggiorna()">Aggiorna ↻</button>
@@ -40,6 +41,24 @@
     <span id="footer-email"></span>
     <span id="footer-timestamp"></span>
   </footer>
+
+  <!-- Modal avanzamento aggiornamento -->
+  <div id="modal-aggiorna" class="modal-overlay" style="display:none">
+    <div class="modal-box">
+      <p class="modal-label">Aggiornamento in corso</p>
+      <div class="progress-track">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <p id="progress-pct" class="progress-pct">0%</p>
+      <p id="progress-msg" class="progress-msg">Avvio...</p>
+      <div id="modal-azioni" class="modal-azioni" style="display:none">
+        <button onclick="chiudiModal()" class="btn-modal">Chiudi</button>
+        <button id="btn-ricarica" onclick="ricaricaDati()" class="btn-modal btn-modal-ok" style="display:none">
+          Ricarica dati
+        </button>
+      </div>
+    </div>
+  </div>
 
   <?!= include('JavaScript') ?>
 

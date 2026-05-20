@@ -5,15 +5,14 @@ import glob
 import time
 import tempfile
 import logging
+from datetime import datetime
 
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
-from webdriver_manager.chrome import ChromeDriverManager
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
@@ -26,14 +25,15 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # --- CONFIGURAZIONE DA VARIABILI D'AMBIENTE ---
-USERNAME = os.environ["AICS_USERNAME"]
-PASSWORD = os.environ["AICS_PASSWORD"]
+USERNAME      = os.environ["AICS_USERNAME"]
+PASSWORD      = os.environ["AICS_PASSWORD"]
 GOOGLE_SA_JSON = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
-LOGIN_URL = "https://www.aicsnetwork.net/aicsnw/default.aspx"
+LOGIN_URL  = "https://www.aicsnetwork.net/aicsnw/default.aspx"
 SHEET_NAME = "Lista Soci"
-COLUMNS = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA"]
+META_SHEET = "Meta"
+COLUMNS    = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA"]
 
 
 def crea_driver(download_dir: str) -> webdriver.Chrome:
@@ -44,6 +44,7 @@ def crea_driver(download_dir: str) -> webdriver.Chrome:
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-features=InsecureDownloadWarnings")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     opts.add_experimental_option("prefs", {
@@ -53,10 +54,14 @@ def crea_driver(download_dir: str) -> webdriver.Chrome:
         "safebrowsing.enabled": False,
     })
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=opts,
-    )
+    # Su GitHub Actions browser-actions/setup-chrome esporta CHROME_BIN
+    chrome_bin = os.environ.get("CHROME_BIN")
+    if chrome_bin:
+        opts.binary_location = chrome_bin
+        log.info("Chrome binary: %s", chrome_bin)
+
+    # Selenium-manager (incluso in selenium >= 4.6) scarica chromedriver automaticamente
+    driver = webdriver.Chrome(options=opts)
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {
         "behavior": "allow",
         "downloadPath": download_dir,
@@ -83,7 +88,6 @@ def leggi_file(file_path: str) -> pd.DataFrame:
 
 
 def pulisci_tessera(val) -> str:
-    """Rimuove il '.0' che pandas aggiunge leggendo numeri tessera come float."""
     s = str(val).strip()
     if s in ("nan", "None", "NaT"):
         return ""
@@ -91,7 +95,6 @@ def pulisci_tessera(val) -> str:
 
 
 def pulisci_data(val) -> str:
-    """Da '24/11/2025 00:00:00' restituisce '24/11/2025'."""
     s = str(val).strip()
     if s in ("nan", "None", "NaT", ""):
         return ""
@@ -104,17 +107,14 @@ def estrai_colonne(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(
             f"Colonne mancanti: {mancanti}. Disponibili: {list(df.columns)}"
         )
-
     df_clean = df[COLUMNS].copy()
     df_clean = df_clean[
         df_clean["NOMINATIVO"].notna()
         & (df_clean["NOMINATIVO"].astype(str).str.strip() != "")
     ]
-
     df_clean["N° TESSERA"] = df_clean["N° TESSERA"].apply(pulisci_tessera)
     for col in ["RILASCIO", "SCADENZA"]:
         df_clean[col] = df_clean[col].apply(pulisci_data)
-
     log.info("Righe valide estratte: %d", len(df_clean))
     return df_clean
 
@@ -127,12 +127,12 @@ def carica_su_sheets(df: pd.DataFrame) -> None:
     ]
 
     sa_dict = json.loads(GOOGLE_SA_JSON)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_dict, scopes)
-    client = gspread.authorize(creds)
+    creds   = ServiceAccountCredentials.from_json_keyfile_dict(sa_dict, scopes)
+    client  = gspread.authorize(creds)
 
     log.info("Apertura spreadsheet: %s", SPREADSHEET_ID)
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
-    worksheet = spreadsheet.worksheet(SHEET_NAME)
+    worksheet   = spreadsheet.worksheet(SHEET_NAME)
 
     log.info("Svuoto il foglio '%s'...", SHEET_NAME)
     worksheet.clear()
@@ -144,12 +144,27 @@ def carica_su_sheets(df: pd.DataFrame) -> None:
     ]
     dati = [COLUMNS] + righe
 
-    log.info("Carico %d righe + header (%d totale)...", len(righe), len(dati))
+    log.info("Carico %d righe + header...", len(righe))
     worksheet.update(dati, value_input_option="USER_ENTERED")
     log.info(
         "Caricamento completato: https://docs.google.com/spreadsheets/d/%s/edit",
         SPREADSHEET_ID,
     )
+
+    # Scrivi timestamp su foglio Meta (letto dalla webapp)
+    try:
+        import zoneinfo
+        ts = datetime.now(tz=zoneinfo.ZoneInfo("Europe/Rome")).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        ts = datetime.utcnow().strftime("%d/%m/%Y %H:%M UTC")
+
+    try:
+        meta_ws = spreadsheet.worksheet(META_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        meta_ws = spreadsheet.add_worksheet(title=META_SHEET, rows=2, cols=1)
+
+    meta_ws.update([[ts]], "A1")
+    log.info("Timestamp aggiornamento scritto sul foglio Meta: %s", ts)
 
 
 def scarica_soci() -> None:
@@ -157,7 +172,7 @@ def scarica_soci() -> None:
     log.info("Cartella download temporanea: %s", download_dir)
 
     driver = crea_driver(download_dir)
-    wait = WebDriverWait(driver, 60)
+    wait   = WebDriverWait(driver, 60)
 
     try:
         log.info("Apertura pagina di login: %s", LOGIN_URL)
@@ -215,16 +230,15 @@ def scarica_soci() -> None:
         driver.execute_script("arguments[0].click();", btn_stampa)
         log.info("Pulsante STAMPA LISTA cliccato. Attesa download...")
 
-        timeout = 60
+        timeout    = 60
         start_time = time.time()
         possible_targets = ["Lista soci.xlsx", "Lista soci.xls"]
 
         while time.time() - start_time < timeout:
-            files = os.listdir(download_dir)
+            files      = os.listdir(download_dir)
             temp_files = [
                 f for f in files
-                if "Lista soci" in f
-                and (f.endswith(".crdownload") or f.endswith(".tmp"))
+                if "Lista soci" in f and (f.endswith(".crdownload") or f.endswith(".tmp"))
             ]
             found_file = next((t for t in possible_targets if t in files), None)
 
@@ -249,12 +263,10 @@ def scarica_soci() -> None:
                             log.warning("File bloccato, tentativo %d/10...", tentativo + 1)
                             time.sleep(2)
                     else:
-                        raise RuntimeError(
-                            "Impossibile rinominare il file dopo 10 tentativi."
-                        )
+                        raise RuntimeError("Impossibile rinominare il file dopo 10 tentativi.")
 
                 df_completo = leggi_file(final_path)
-                df_soci = estrai_colonne(df_completo)
+                df_soci     = estrai_colonne(df_completo)
                 carica_su_sheets(df_soci)
 
                 log.info("=== PROCESSO COMPLETATO CON SUCCESSO ===")

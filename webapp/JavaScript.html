@@ -1,8 +1,10 @@
 <script>
 'use strict';
 
-var _tuttiSoci    = [];
+var _tuttiSoci     = [];
 var _debounceTimer = null;
+var _pollTimer     = null;
+var _inProgressCnt = 0;
 
 /* ---- Avvio ---- */
 
@@ -29,11 +31,18 @@ function caricaSoci() {
     '<p style="padding:32px;text-align:center;color:#aaa">Caricamento in corso...</p>';
 
   google.script.run
-    .withSuccessHandler(function (soci) {
-      _tuttiSoci = soci;
+    .withSuccessHandler(function (result) {
+      _tuttiSoci = result.soci;
+
+      var aggEl = document.getElementById('ultimo-aggiornamento');
+      aggEl.textContent = result.aggiornato
+        ? 'Ultimo aggiornamento scraper: ' + result.aggiornato
+        : '';
+
       document.getElementById('footer-timestamp').textContent =
-        'Dati alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-      renderCards(soci, soci.length);
+        'Caricato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+
+      renderCards(_tuttiSoci, _tuttiSoci.length);
     })
     .withFailureHandler(function (err) {
       document.getElementById('lista').innerHTML =
@@ -65,14 +74,14 @@ function renderCards(soci, totale) {
   var lista      = document.getElementById('lista');
 
   if (soci.length === 0) {
-    lista.innerHTML        = '';
+    lista.innerHTML          = '';
     emptyState.style.display = '';
     return;
   }
 
   emptyState.style.display = 'none';
   lista.innerHTML = soci.map(function (s) {
-    var badge = calcolaBadge(s.scadenza, s.tessera);
+    var badge  = calcolaBadge(s.scadenza, s.tessera);
     var dateRow = (s.rilascio || s.scadenza)
       ? '<div class="date-row">Rilascio: ' + esc(s.rilascio || '—') + ' &nbsp;·&nbsp; Scadenza: ' + esc(s.scadenza || '—') + '</div>'
       : '';
@@ -99,41 +108,114 @@ function calcolaBadge(scadenza, tessera) {
   if (!scadenza) {
     return { cls: 'badge-attiva', label: 'Attiva' };
   }
-
   var parti = scadenza.split('/');
   if (parti.length !== 3) {
     return { cls: 'badge-attiva', label: 'Attiva' };
   }
-
   var dataScad = new Date(parseInt(parti[2], 10), parseInt(parti[1], 10) - 1, parseInt(parti[0], 10));
   var oggi = new Date();
   oggi.setHours(0, 0, 0, 0);
-  var giorniRimasti = Math.floor((dataScad - oggi) / 86400000);
-
-  if (giorniRimasti < 0)  return { cls: 'badge-scaduta', label: 'Scaduta' };
-  if (giorniRimasti <= 30) return { cls: 'badge-scade',   label: 'Scade tra ' + giorniRimasti + ' gg' };
+  var gg = Math.floor((dataScad - oggi) / 86400000);
+  if (gg < 0)   return { cls: 'badge-scaduta', label: 'Scaduta' };
+  if (gg <= 30) return { cls: 'badge-scade',   label: 'Scade tra ' + gg + ' gg' };
   return { cls: 'badge-attiva', label: 'Attiva' };
 }
 
-/* ---- Aggiornamento manuale ---- */
+/* ---- Aggiornamento con barra di avanzamento ---- */
 
 function aggiorna() {
-  var btn = document.getElementById('btn-aggiorna');
-  btn.textContent = 'In corso...';
-  btn.disabled = true;
+  _mostraModal();
+  _setProgress(0, 'Avvio aggiornamento...', false, false);
 
   google.script.run
     .withSuccessHandler(function (res) {
-      btn.textContent = 'Aggiorna ↻';
-      btn.disabled    = false;
-      alert(res.message);
+      if (!res.ok) {
+        _setProgress(100, res.message, true, true);
+        return;
+      }
+      _setProgress(10, 'Workflow avviato. In attesa di conferma...', false, false);
+      _inProgressCnt = 0;
+      // Attendi 8s prima del primo poll: il run impiega qualche secondo ad apparire nell'API
+      _pollTimer = setTimeout(_pollWorkflow, 8000);
     })
     .withFailureHandler(function (err) {
-      btn.textContent = 'Aggiorna ↻';
-      btn.disabled    = false;
-      alert('Errore imprevisto: ' + (err.message || err));
+      _setProgress(100, 'Errore: ' + (err.message || String(err)), true, true);
     })
     .triggerAggiornamento();
+}
+
+function _pollWorkflow() {
+  google.script.run
+    .withSuccessHandler(function (stato) {
+      if (stato.status === 'queued' || stato.status === 'not_found') {
+        _setProgress(15, stato.message || 'In coda...', false, false);
+        _pollTimer = setTimeout(_pollWorkflow, 5000);
+
+      } else if (stato.status === 'in_progress') {
+        _inProgressCnt++;
+        // Curva esponenziale che si avvicina a 85%: 20 + 65*(1-e^(-n/15))
+        var pct = Math.round(20 + 65 * (1 - Math.exp(-_inProgressCnt / 15)));
+        pct = Math.min(pct, 85);
+        var mins = Math.floor((_inProgressCnt * 5) / 60);
+        var msg  = (stato.message || 'In esecuzione...') + (mins > 0 ? ' (' + mins + ' min)' : '');
+        _setProgress(pct, msg, false, false);
+        _pollTimer = setTimeout(_pollWorkflow, 5000);
+
+      } else if (stato.status === 'completed') {
+        var successo = stato.conclusion === 'success';
+        var msg = stato.message || '';
+        if (!successo && stato.runUrl) {
+          msg += '\n\nLog: ' + stato.runUrl;
+        }
+        _setProgress(100, msg, true, !successo);
+        if (successo) {
+          document.getElementById('btn-ricarica').style.display = '';
+        }
+
+      } else {
+        // status === 'error' o sconosciuto
+        _setProgress(100, stato.message || 'Errore sconosciuto.', true, true);
+      }
+    })
+    .withFailureHandler(function (err) {
+      _setProgress(100, 'Errore di polling: ' + (err.message || String(err)), true, true);
+    })
+    .getWorkflowStatus();
+}
+
+/* ---- Gestione modal ---- */
+
+function _mostraModal() {
+  clearTimeout(_pollTimer);
+  var fill = document.getElementById('progress-fill');
+  fill.style.width      = '0%';
+  fill.style.background = '';
+  document.getElementById('progress-pct').textContent   = '0%';
+  document.getElementById('progress-msg').textContent   = 'Avvio...';
+  document.getElementById('modal-azioni').style.display = 'none';
+  document.getElementById('btn-ricarica').style.display = 'none';
+  document.getElementById('modal-aggiorna').style.display = 'flex';
+}
+
+function _setProgress(pct, msg, done, errore) {
+  var fill = document.getElementById('progress-fill');
+  fill.style.width = pct + '%';
+  if (errore) fill.style.background = '#ef4444';
+  document.getElementById('progress-pct').textContent = pct + '%';
+  document.getElementById('progress-msg').textContent = msg;
+  if (done) {
+    document.getElementById('modal-azioni').style.display = '';
+  }
+}
+
+function chiudiModal() {
+  clearTimeout(_pollTimer);
+  document.getElementById('modal-aggiorna').style.display = 'none';
+}
+
+function ricaricaDati() {
+  chiudiModal();
+  caricaSoci();
 }
 
 /* ---- Utilità ---- */

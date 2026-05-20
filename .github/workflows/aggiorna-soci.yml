@@ -16,6 +16,15 @@ jobs:
 
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+
+      - name: Esporta percorso Chrome
+        run: |
+          CHROME=$(which google-chrome || which chromium-browser || which chromium 2>/dev/null || echo "")
+          if [ -n "$CHROME" ]; then
+            echo "CHROME_BIN=$CHROME" >> $GITHUB_ENV
+            echo "Chrome trovato: $CHROME"
+          fi
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
