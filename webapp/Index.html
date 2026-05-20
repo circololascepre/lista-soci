@@ -10,7 +10,7 @@
 
   <header class="app-header">
     <div class="header-inner">
-      <h1 class="app-title">Lista Soci <span id="dbg-ver" style="background:#3b82f6;color:#fff;font-size:10px;padding:2px 6px;border-radius:8px;vertical-align:middle">v17</span></h1>
+      <h1 class="app-title">Lista Soci</h1>
       <div class="search-wrap">
         <input
           type="search"
@@ -63,6 +63,24 @@
           Ricarica dati
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Overlay login -->
+  <div id="login-overlay" class="login-overlay" style="display:none">
+    <div class="login-box">
+      <p class="login-title">Lista Soci</p>
+      <p class="login-sub">Circolo La Scepre</p>
+      <input
+        type="password"
+        id="login-pw"
+        class="login-input"
+        placeholder="Password"
+        autocomplete="current-password"
+        onkeydown="if(event.key==='Enter')doLogin()"
+      >
+      <button class="btn-login" onclick="doLogin()">Accedi</button>
+      <p id="login-err" class="login-err"></p>
     </div>
   </div>
 

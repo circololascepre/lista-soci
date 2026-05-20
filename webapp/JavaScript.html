@@ -2,11 +2,7 @@
 /* Rileva larghezza reale (funziona anche dentro iframe Google) */
 (function () {
   function _sync() {
-    var w = window.innerWidth;
-    var mobile = w < 1100;
-    document.documentElement.classList.toggle('is-mobile', mobile);
-    var dbg = document.getElementById('dbg-ver');
-    if (dbg) dbg.textContent = 'v17 ' + w + 'px ' + (mobile ? 'MOB' : 'DSK');
+    document.documentElement.classList.toggle('is-mobile', window.innerWidth < 1100);
   }
   _sync();
   window.addEventListener('resize', _sync);
@@ -29,7 +25,7 @@ document.addEventListener('DOMContentLoaded', function () {
     })
     .getUserEmail();
 
-  caricaSoci();
+  _checkSession();
 
   document.getElementById('search').addEventListener('input', function () {
     clearTimeout(_debounceTimer);
@@ -299,6 +295,53 @@ function chiudiModal() {
 function ricaricaDati() {
   chiudiModal();
   caricaSoci();
+}
+
+/* ---- Login / sessione ---- */
+
+var _SESSION_KEY = 'soci_session_v1';
+
+function _checkSession() {
+  var stored = localStorage.getItem(_SESSION_KEY);
+  if (!stored) { _mostraLogin(); return; }
+  google.script.run
+    .withSuccessHandler(function (ok) {
+      if (ok) { _nascondiLogin(); caricaSoci(); }
+      else    { localStorage.removeItem(_SESSION_KEY); _mostraLogin(); }
+    })
+    .withFailureHandler(function () { _mostraLogin(); })
+    .checkPassword(stored);
+}
+
+function doLogin() {
+  var pw = document.getElementById('login-pw').value.trim();
+  if (!pw) return;
+  document.getElementById('login-err').textContent = '';
+  google.script.run
+    .withSuccessHandler(function (ok) {
+      if (ok) {
+        localStorage.setItem(_SESSION_KEY, pw);
+        _nascondiLogin();
+        caricaSoci();
+      } else {
+        document.getElementById('login-err').textContent = 'Password non corretta.';
+        document.getElementById('login-pw').value = '';
+        document.getElementById('login-pw').focus();
+      }
+    })
+    .withFailureHandler(function (err) {
+      document.getElementById('login-err').textContent = 'Errore: ' + (err.message || String(err));
+    })
+    .checkPassword(pw);
+}
+
+function _mostraLogin() {
+  document.getElementById('login-overlay').style.display = 'flex';
+  setTimeout(function () { document.getElementById('login-pw').focus(); }, 150);
+}
+
+function _nascondiLogin() {
+  document.getElementById('login-overlay').style.display = 'none';
 }
 
 /* ---- Utilità ---- */

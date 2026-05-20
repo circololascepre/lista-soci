@@ -9,41 +9,21 @@ var CACHE_TTL     = 300; // 5 minuti
 // ---------------------------------------------------------------------------
 
 function doGet(e) {
-  var email     = Session.getActiveUser().getEmail();
-  var whitelist = getWhitelist_();
-
-  // Blocca solo se l'email è nota E la whitelist non è vuota E l'email non è presente.
-  // Quando l'email è sconosciuta (stringa vuota) l'accesso è permesso:
-  // con access=ANYONE Google non richiede login, quindi non si può autenticare nessuno.
-  var bloccato = email && whitelist.length > 0 && whitelist.indexOf(email.toLowerCase()) === -1;
-
-  if (bloccato) {
-    return HtmlService.createHtmlOutput(
-      '<!DOCTYPE html><html lang="it"><head>' +
-      '<meta charset="UTF-8">' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<title>Accesso negato</title>' +
-      '<style>' +
-        'body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;' +
-        'justify-content:center;min-height:100vh;margin:0;background:#f0f2f5;}' +
-        '.box{background:#fff;padding:32px 28px;border-radius:16px;' +
-        'box-shadow:0 2px 12px rgba(0,0,0,.1);text-align:center;max-width:380px;width:90%;}' +
-        'h2{color:#ef4444;margin:0 0 12px;}p{color:#555;line-height:1.6;margin:0 0 8px;}' +
-        'strong{color:#333;}' +
-      '</style></head><body>' +
-      '<div class="box">' +
-        '<h2>Accesso negato</h2>' +
-        '<p>L\'account <strong>' + escHtml_(email) + '</strong><br>' +
-        'non è autorizzato ad accedere a questa applicazione.</p>' +
-        '<p>Contatta l\'amministratore per richiedere l\'accesso.</p>' +
-      '</div></body></html>'
-    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('Soci Circolo La Scepre')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ---------------------------------------------------------------------------
+// Verifica password (chiamata dal client via google.script.run)
+// Imposta APP_PASSWORD nelle Script Properties per attivare la protezione.
+// ---------------------------------------------------------------------------
+
+function checkPassword(pw) {
+  var correctPw = PropertiesService.getScriptProperties().getProperty('APP_PASSWORD');
+  if (!correctPw) return true; // Nessuna password impostata = accesso libero
+  return String(pw).trim() === String(correctPw).trim();
 }
 
 // ---------------------------------------------------------------------------
