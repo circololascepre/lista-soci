@@ -321,8 +321,42 @@ def scarica_soci() -> None:
     log.info("Risposta STAMPA LISTA — Content-Type: %s | Content-Disposition: %s", ct, cd)
 
     if not is_file_response(resp):
-        log.warning("Risposta non è un file (len=%d). Primi 500 char:\n%s", len(resp.content), resp.text[:500])
-        raise RuntimeError("STAMPA LISTA non ha restituito un file Excel scaricabile.")
+        log.info("Risposta HTML (%d bytes) — analisi per trovare link di download...", len(resp.content))
+        resp_soup = BeautifulSoup(resp.text, "lxml")
+
+        # Meta-refresh (redirect automatico)
+        meta = resp_soup.find("meta", {"http-equiv": re.compile(r"refresh", re.I)})
+        if meta:
+            content = meta.get("content", "")
+            log.info("Meta-refresh trovato: %r", content)
+            m = re.search(r"url=([^\s;\"']+)", content, re.I)
+            if m:
+                redirect_url = requests.compat.urljoin(current_url, m.group(1))
+                log.info("Seguendo meta-refresh: %s", redirect_url)
+                resp = session.get(redirect_url)
+                resp.raise_for_status()
+
+        # Link diretti a file
+        for a in resp_soup.find_all("a", href=True):
+            href = a.get("href", "")
+            if any(x in href.lower() for x in [".xls", ".xlsx", ".csv", "download", "export", "stampa"]):
+                log.info("Link file trovato: href=%r testo=%r", href, a.get_text(strip=True)[:40])
+
+        # Iframe
+        for iframe in resp_soup.find_all("iframe", src=True):
+            log.info("Iframe src=%r", iframe.get("src"))
+
+        # Script con window.location o href a file
+        for script in resp_soup.find_all("script"):
+            txt = script.get_text()
+            if any(x in txt.lower() for x in ["location", ".xls", "download", "window.open"]):
+                log.info("Script con possibile redirect:\n%s", txt[:600])
+
+        # Dump HTML per analisi manuale (utile se non troviamo niente)
+        log.info("Primi 4000 char risposta HTML:\n%s", resp.text[:4000])
+
+        if not is_file_response(resp):
+            raise RuntimeError("STAMPA LISTA non ha restituito un file Excel scaricabile.")
 
     log.info("File ricevuto: %d bytes.", len(resp.content))
     df = leggi_file(resp.content)
