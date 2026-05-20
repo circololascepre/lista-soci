@@ -1,17 +1,14 @@
 import json
 import os
+import re
 import sys
-import glob
-import time
-import tempfile
 import logging
+import tempfile
 from datetime import datetime
+from io import BytesIO
 
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
+import requests
+from bs4 import BeautifulSoup
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
@@ -23,9 +20,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# --- CONFIGURAZIONE DA VARIABILI D'AMBIENTE ---
-USERNAME      = os.environ["AICS_USERNAME"]
-PASSWORD      = os.environ["AICS_PASSWORD"]
+USERNAME       = os.environ["AICS_USERNAME"]
+PASSWORD       = os.environ["AICS_PASSWORD"]
 GOOGLE_SA_JSON = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
@@ -34,58 +30,110 @@ SHEET_NAME = "Lista Soci"
 META_SHEET = "Meta"
 COLUMNS    = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA"]
 
+SESSION_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+}
 
-def crea_driver(download_dir: str) -> uc.Chrome:
-    opts = uc.ChromeOptions()
-    opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-features=InsecureDownloadWarnings")
-    opts.add_experimental_option("prefs", {
-        "download.default_directory": download_dir,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": False,
-    })
 
-    chrome_bin = os.environ.get("CHROME_BIN")
-    if chrome_bin:
-        log.info("Chrome binary: %s", chrome_bin)
+# ── Helpers HTTP ──────────────────────────────────────────────────────────────
 
-    # Su Windows self-hosted la variabile CI non è impostata → headless=False va bene.
-    # Su GitHub-hosted (Linux + Xvfb) forziamo headless=False perché il display virtuale è disponibile.
-    # Se serve headless esplicito, impostare FORCE_HEADLESS=1 nell'env.
-    force_headless = os.environ.get("FORCE_HEADLESS", "0") == "1"
-    driver = uc.Chrome(
-        options=opts,
-        browser_executable_path=chrome_bin if chrome_bin else None,
-        headless=force_headless,
+def estrai_viewstate(soup: BeautifulSoup) -> dict:
+    return {
+        inp["name"]: inp.get("value", "")
+        for inp in soup.find_all("input", {"type": "hidden"})
+        if inp.get("name")
+    }
+
+
+def naviga_elemento(
+    session: requests.Session,
+    current_url: str,
+    soup: BeautifulSoup,
+    element_id: str,
+) -> requests.Response:
+    """Trova un elemento per ID e lo "clicca" (GET diretto o POST __doPostBack)."""
+    el = soup.find(id=element_id)
+    if not el:
+        # Ricerca parziale per robustezza con prefissi ASP.NET variabili
+        el = soup.find(id=re.compile(re.escape(element_id) + r"$"))
+    if not el:
+        ids_disponibili = [t.get("id") for t in soup.find_all(id=True)][:30]
+        raise RuntimeError(
+            f"Elemento '{element_id}' non trovato nel DOM. "
+            f"IDs presenti (prime 30): {ids_disponibili}"
+        )
+
+    href    = el.get("href", "")
+    onclick = el.get("onclick", "")
+    log.info(
+        "Elemento '%s' trovato: tag=<%s> href=%r onclick=%r",
+        element_id, el.name, href[:100], onclick[:100],
     )
-    driver.execute_cdp_cmd("Page.setDownloadBehavior", {
-        "behavior": "allow",
-        "downloadPath": download_dir,
-    })
-    return driver
+
+    # Href diretto (non JavaScript)
+    if href and not href.startswith("javascript:") and href != "#":
+        url = requests.compat.urljoin(current_url, href)
+        log.info("GET %s", url)
+        resp = session.get(url)
+        resp.raise_for_status()
+        return resp
+
+    # __doPostBack dentro href o onclick
+    for testo in [href, onclick]:
+        m = re.search(r"__doPostBack\(['\"]([^'\"]+)['\"],\s*['\"]([^'\"]*)['\"]", testo)
+        if m:
+            target, argument = m.group(1), m.group(2)
+            log.info("Postback: __EVENTTARGET=%r __EVENTARGUMENT=%r", target, argument)
+            data = estrai_viewstate(soup)
+            data["__EVENTTARGET"]   = target
+            data["__EVENTARGUMENT"] = argument
+            resp = session.post(current_url, data=data)
+            resp.raise_for_status()
+            return resp
+
+    raise RuntimeError(
+        f"Impossibile navigare '{element_id}': href={href!r} onclick={onclick!r}"
+    )
 
 
-def leggi_file(file_path: str) -> pd.DataFrame:
-    log.info("Lettura file: %s", file_path)
+def is_file_response(resp: requests.Response) -> bool:
+    cd = resp.headers.get("Content-Disposition", "").lower()
+    ct = resp.headers.get("Content-Type", "").lower()
+    return (
+        "attachment" in cd
+        or "xls" in ct
+        or "excel" in ct
+        or "spreadsheet" in ct
+        or "octet-stream" in ct
+    )
+
+
+# ── Lettura file ──────────────────────────────────────────────────────────────
+
+def leggi_file(content: bytes) -> pd.DataFrame:
     try:
-        tabelle = pd.read_html(file_path, encoding="utf-8")
+        tabelle = pd.read_html(BytesIO(content), encoding="utf-8")
         if tabelle:
-            log.info("File letto come HTML.")
+            log.info("File letto come HTML (%d tabelle).", len(tabelle))
             return tabelle[0]
     except Exception as e_html:
         log.warning("Lettura HTML fallita (%s), provo come Excel...", e_html)
 
     try:
-        df = pd.read_excel(file_path)
-        log.info("File letto come Excel standard.")
+        df = pd.read_excel(BytesIO(content))
+        log.info("File letto come Excel.")
         return df
     except Exception as e_xls:
-        raise RuntimeError(f"Impossibile leggere il file: {e_xls}")
+        raise RuntimeError(f"Impossibile leggere il file scaricato: {e_xls}")
 
+
+# ── Pulizia dati ──────────────────────────────────────────────────────────────
 
 def pulisci_tessera(val) -> str:
     s = str(val).strip()
@@ -119,13 +167,14 @@ def estrai_colonne(df: pd.DataFrame) -> pd.DataFrame:
     return df_clean
 
 
+# ── Upload Google Sheets ──────────────────────────────────────────────────────
+
 def carica_su_sheets(df: pd.DataFrame) -> None:
     log.info("--- CARICAMENTO SU GOOGLE SHEETS ---")
     scopes = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
     ]
-
     sa_dict = json.loads(GOOGLE_SA_JSON)
     creds   = ServiceAccountCredentials.from_json_keyfile_dict(sa_dict, scopes)
     client  = gspread.authorize(creds)
@@ -134,16 +183,13 @@ def carica_su_sheets(df: pd.DataFrame) -> None:
     spreadsheet = client.open_by_key(SPREADSHEET_ID)
     worksheet   = spreadsheet.worksheet(SHEET_NAME)
 
-    log.info("Svuoto il foglio '%s'...", SHEET_NAME)
     worksheet.clear()
-
     df_pulito = df.fillna("").infer_objects(copy=False)
     righe = [
         [str(v) if str(v) not in ("nan", "None", "NaT") else "" for v in row]
         for row in df_pulito.values.tolist()
     ]
     dati = [COLUMNS] + righe
-
     log.info("Carico %d righe + header...", len(righe))
     worksheet.update(dati, value_input_option="USER_ENTERED")
     log.info(
@@ -151,7 +197,6 @@ def carica_su_sheets(df: pd.DataFrame) -> None:
         SPREADSHEET_ID,
     )
 
-    # Scrivi timestamp su foglio Meta (letto dalla webapp)
     try:
         import zoneinfo
         ts = datetime.now(tz=zoneinfo.ZoneInfo("Europe/Rome")).strftime("%d/%m/%Y %H:%M")
@@ -162,139 +207,90 @@ def carica_su_sheets(df: pd.DataFrame) -> None:
         meta_ws = spreadsheet.worksheet(META_SHEET)
     except gspread.exceptions.WorksheetNotFound:
         meta_ws = spreadsheet.add_worksheet(title=META_SHEET, rows=2, cols=1)
-
     meta_ws.update([[ts]], "A1")
-    log.info("Timestamp aggiornamento scritto sul foglio Meta: %s", ts)
+    log.info("Timestamp aggiornamento scritto: %s", ts)
 
+
+# ── Flusso principale ─────────────────────────────────────────────────────────
 
 def scarica_soci() -> None:
-    download_dir = tempfile.mkdtemp()
-    log.info("Cartella download temporanea: %s", download_dir)
+    session = requests.Session()
+    session.headers.update(SESSION_HEADERS)
 
-    driver = crea_driver(download_dir)
-    wait   = WebDriverWait(driver, 60)
+    # ── 1. Login ──────────────────────────────────────────────────────────────
+    log.info("GET pagina di login: %s", LOGIN_URL)
+    resp = session.get(LOGIN_URL)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "lxml")
 
+    data = estrai_viewstate(soup)
+    data["Txt_UtIn_Id"]     = USERNAME
+    data["Txt_UtIn_Passwo"] = PASSWORD
+    btn = soup.find(id="Cmd_SingIn")
+    if btn:
+        data[btn.get("name", "Cmd_SingIn")] = btn.get("value", "")
+
+    log.info("POST login...")
+    resp = session.post(LOGIN_URL, data=data)
+    resp.raise_for_status()
+
+    current_url = resp.url
+    soup        = BeautifulSoup(resp.text, "lxml")
+
+    if soup.find("input", {"id": "Txt_UtIn_Id"}):
+        raise RuntimeError("Login fallito: ancora sulla pagina di login dopo POST.")
+    log.info("Login riuscito. URL: %s", current_url)
+
+    # ── 2. Navigazione verso TUTTI I SOCI ─────────────────────────────────────
+    log.info("Navigazione verso TUTTI I SOCI (ctl00_Mnu040_Link01)...")
+    resp = naviga_elemento(session, current_url, soup, "ctl00_Mnu040_Link01")
+
+    if is_file_response(resp):
+        log.info("Risposta è già un file (download diretto da link menu).")
+        df = leggi_file(resp.content)
+        carica_su_sheets(estrai_colonne(df))
+        log.info("=== PROCESSO COMPLETATO CON SUCCESSO ===")
+        return
+
+    current_url = resp.url
+    soup        = BeautifulSoup(resp.text, "lxml")
+    log.info("URL TUTTI I SOCI: %s", current_url)
+
+    # ── 3. STAMPA LISTA ───────────────────────────────────────────────────────
+    stampa_id = "ctl00_ContentPlaceHolder2_Tab1_Tab_Soci_Lnk_Stampa"
+    log.info("Click su STAMPA LISTA (%s)...", stampa_id)
     try:
-        log.info("Apertura pagina di login: %s", LOGIN_URL)
-        driver.get(LOGIN_URL)
+        resp = naviga_elemento(session, current_url, soup, stampa_id)
+    except RuntimeError as e:
+        log.warning("%s. Fallback: cerco per testo 'STAMPA LISTA'...", e)
+        el = soup.find("a", string=re.compile(r"STAMPA\s+LISTA", re.I))
+        if not el:
+            raise RuntimeError("Pulsante STAMPA LISTA non trovato né per ID né per testo.")
+        href = el.get("href", "")
+        m    = re.search(r"__doPostBack\(['\"]([^'\"]+)['\"],\s*['\"]([^'\"]*)['\"]", href + el.get("onclick", ""))
+        if m:
+            data = estrai_viewstate(soup)
+            data["__EVENTTARGET"]   = m.group(1)
+            data["__EVENTARGUMENT"] = m.group(2)
+            resp = session.post(current_url, data=data)
+        elif href and not href.startswith("javascript:"):
+            resp = session.get(requests.compat.urljoin(current_url, href))
+        else:
+            raise RuntimeError(f"STAMPA LISTA non cliccabile: href={href!r}")
+        resp.raise_for_status()
 
-        log.info("Inserimento credenziali...")
-        log.info("URL pagina login: %s", driver.current_url)
-        wait.until(EC.presence_of_element_located((By.ID, "Txt_UtIn_Id"))).send_keys(USERNAME)
-        driver.find_element(By.ID, "Txt_UtIn_Passwo").send_keys(PASSWORD)
-        # Stesso approccio del copione locale che funziona su Windows
-        login_btn = driver.find_element(By.ID, "Cmd_SingIn")
-        driver.execute_script("arguments[0].click();", login_btn)
+    cd = resp.headers.get("Content-Disposition", "")
+    ct = resp.headers.get("Content-Type", "")
+    log.info("Risposta STAMPA LISTA — Content-Type: %s | Content-Disposition: %s", ct, cd)
 
-        log.info("Login inviato. Attesa caricamento dashboard...")
-        time.sleep(15)
-        log.info("URL dopo login: %s", driver.current_url)
-        log.info("Titolo pagina dopo login: %s", driver.title)
-        driver.save_screenshot("/tmp/screenshot_dopo_login.png")
-        log.info("Screenshot post-login salvato.")
+    if not is_file_response(resp):
+        log.warning("Risposta non è un file (len=%d). Primi 500 char:\n%s", len(resp.content), resp.text[:500])
+        raise RuntimeError("STAMPA LISTA non ha restituito un file Excel scaricabile.")
 
-        log.info("Click su menu SOCI (ctl00_Mnu040)...")
-        menu_soci = wait.until(EC.presence_of_element_located((By.ID, "ctl00_Mnu040")))
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", menu_soci)
-        time.sleep(2)
-        try:
-            ActionChains(driver).move_to_element(menu_soci).perform()
-            time.sleep(1)
-        except Exception:
-            pass
-        driver.execute_script("arguments[0].click();", menu_soci)
-
-        log.info("Click su 'TUTTI I SOCI' (ctl00_Mnu040_Link01)...")
-        time.sleep(3)
-        tutti_soci = wait.until(
-            EC.presence_of_element_located((By.ID, "ctl00_Mnu040_Link01"))
-        )
-        driver.execute_script("arguments[0].click();", tutti_soci)
-
-        log.info("Ricerca pulsante 'STAMPA LISTA'...")
-        time.sleep(10)
-        try:
-            btn_stampa = wait.until(EC.presence_of_element_located(
-                (By.ID, "ctl00_ContentPlaceHolder2_Tab1_Tab_Soci_Lnk_Stampa")
-            ))
-        except Exception:
-            log.warning("ID specifico non trovato, cerco per testo 'STAMPA LISTA'...")
-            btn_stampa = wait.until(
-                EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "STAMPA LISTA"))
-            )
-
-        for f in glob.glob(os.path.join(download_dir, "Lista soci*.xls*")):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
-
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn_stampa)
-        time.sleep(2)
-        driver.execute_script("arguments[0].click();", btn_stampa)
-        log.info("Pulsante STAMPA LISTA cliccato. Attesa download...")
-
-        timeout    = 60
-        start_time = time.time()
-        possible_targets = ["Lista soci.xlsx", "Lista soci.xls"]
-
-        while time.time() - start_time < timeout:
-            files      = os.listdir(download_dir)
-            temp_files = [
-                f for f in files
-                if "Lista soci" in f and (f.endswith(".crdownload") or f.endswith(".tmp"))
-            ]
-            found_file = next((t for t in possible_targets if t in files), None)
-
-            if temp_files:
-                log.info("Download in corso... (%s)", temp_files)
-            elif found_file:
-                log.info("File '%s' pronto.", found_file)
-                driver.quit()
-                log.info("Browser chiuso.")
-
-                final_path = os.path.join(download_dir, found_file)
-
-                if found_file.endswith(".xls"):
-                    new_path = os.path.join(download_dir, "Lista soci.xlsx")
-                    for tentativo in range(10):
-                        try:
-                            os.rename(final_path, new_path)
-                            final_path = new_path
-                            log.info("File rinominato in .xlsx.")
-                            break
-                        except OSError:
-                            log.warning("File bloccato, tentativo %d/10...", tentativo + 1)
-                            time.sleep(2)
-                    else:
-                        raise RuntimeError("Impossibile rinominare il file dopo 10 tentativi.")
-
-                df_completo = leggi_file(final_path)
-                df_soci     = estrai_colonne(df_completo)
-                carica_su_sheets(df_soci)
-
-                log.info("=== PROCESSO COMPLETATO CON SUCCESSO ===")
-                return
-
-            time.sleep(2)
-
-        raise RuntimeError(f"Timeout {timeout}s raggiunto senza trovare il file scaricato.")
-
-    except Exception:
-        log.exception("ERRORE DURANTE L'ESECUZIONE")
-        try:
-            screenshot_path = "/tmp/screenshot_errore.png"
-            driver.save_screenshot(screenshot_path)
-            log.info("Screenshot salvato: %s", screenshot_path)
-            log.info("URL al momento dell'errore: %s", driver.current_url)
-            log.info("Titolo pagina: %s", driver.title)
-        except Exception:
-            pass
-        try:
-            driver.quit()
-        except Exception:
-            pass
-        raise
+    log.info("File ricevuto: %d bytes.", len(resp.content))
+    df = leggi_file(resp.content)
+    carica_su_sheets(estrai_colonne(df))
+    log.info("=== PROCESSO COMPLETATO CON SUCCESSO ===")
 
 
 if __name__ == "__main__":
@@ -302,4 +298,5 @@ if __name__ == "__main__":
         scarica_soci()
         sys.exit(0)
     except Exception:
+        log.exception("ERRORE DURANTE L'ESECUZIONE")
         sys.exit(1)
