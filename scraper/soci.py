@@ -38,17 +38,12 @@ COLUMNS    = ["NOMINATIVO", "N° TESSERA", "TIPO TESSERA", "RILASCIO", "SCADENZA
 
 def crea_driver(download_dir: str) -> webdriver.Chrome:
     opts = Options()
-    opts.add_argument("--headless")
+    opts.add_argument("--headless=new")
     opts.add_argument("--window-size=1920,1080")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-features=InsecureDownloadWarnings")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_argument(
-        "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
-    )
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     opts.add_experimental_option("prefs", {
@@ -183,16 +178,12 @@ def scarica_soci() -> None:
         driver.get(LOGIN_URL)
 
         log.info("Inserimento credenziali...")
-        campo_id = wait.until(EC.presence_of_element_located((By.ID, "Txt_UtIn_Id")))
-        campo_id.clear()
-        campo_id.send_keys(USERNAME)
-        campo_pw = driver.find_element(By.ID, "Txt_UtIn_Passwo")
-        campo_pw.clear()
-        campo_pw.send_keys(PASSWORD)
-        log.info("URL prima del login: %s", driver.current_url)
-        log.info("Titolo prima del login: %s", driver.title)
-        # Click diretto (non JS) per triggerare correttamente il postback ASP.NET
-        driver.find_element(By.ID, "Cmd_SingIn").click()
+        log.info("URL pagina login: %s", driver.current_url)
+        wait.until(EC.presence_of_element_located((By.ID, "Txt_UtIn_Id"))).send_keys(USERNAME)
+        driver.find_element(By.ID, "Txt_UtIn_Passwo").send_keys(PASSWORD)
+        # Stesso approccio del copione locale che funziona su Windows
+        login_btn = driver.find_element(By.ID, "Cmd_SingIn")
+        driver.execute_script("arguments[0].click();", login_btn)
 
         log.info("Login inviato. Attesa caricamento dashboard...")
         time.sleep(15)
