@@ -223,15 +223,52 @@ def scarica_soci() -> None:
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "lxml")
 
+    # Log struttura form per diagnostica
+    form = soup.find("form")
+    if form:
+        log.info("Form action=%r method=%r", form.get("action"), form.get("method"))
+    for inp in soup.find_all("input"):
+        if inp.get("type", "").lower() != "hidden":
+            log.info(
+                "INPUT name=%r id=%r type=%r value=%r onclick=%r",
+                inp.get("name"), inp.get("id"), inp.get("type"),
+                inp.get("value", "")[:40], inp.get("onclick", "")[:80],
+            )
+
     data = estrai_viewstate(soup)
     data["Txt_UtIn_Id"]     = USERNAME
     data["Txt_UtIn_Passwo"] = PASSWORD
+
     btn = soup.find(id="Cmd_SingIn")
     if btn:
-        data[btn.get("name", "Cmd_SingIn")] = btn.get("value", "")
+        log.info(
+            "Pulsante login: tag=%s name=%r type=%r value=%r onclick=%r",
+            btn.name, btn.get("name"), btn.get("type"),
+            btn.get("value"), btn.get("onclick", "")[:80],
+        )
+        onclick = btn.get("onclick", "")
+        m = re.search(r"__doPostBack\(['\"]([^'\"]+)['\"],\s*['\"]([^'\"]*)['\"]", onclick)
+        if m:
+            # Pulsante usa __doPostBack invece di submit standard
+            data["__EVENTTARGET"]   = m.group(1)
+            data["__EVENTARGUMENT"] = m.group(2)
+            log.info("Login via __doPostBack: target=%r", m.group(1))
+        else:
+            btn_name = btn.get("name") or "Cmd_SingIn"
+            data[btn_name] = btn.get("value", "")
+    else:
+        log.warning("Pulsante Cmd_SingIn non trovato nel DOM.")
 
-    log.info("POST login...")
-    resp = session.post(LOGIN_URL, data=data)
+    # Usa action del form se diversa dalla URL corrente
+    post_url = LOGIN_URL
+    if form:
+        action = form.get("action", "")
+        if action and not action.startswith("javascript:"):
+            post_url = requests.compat.urljoin(LOGIN_URL, action)
+    log.info("POST login a: %s | campi inviati: %s", post_url,
+             [k for k in data if not k.startswith("__VIEW")])
+
+    resp = session.post(post_url, data=data)
     resp.raise_for_status()
 
     current_url = resp.url
