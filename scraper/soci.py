@@ -183,12 +183,16 @@ def scarica_soci() -> None:
         driver.get(LOGIN_URL)
 
         log.info("Inserimento credenziali...")
-        wait.until(EC.presence_of_element_located((By.ID, "Txt_UtIn_Id"))).send_keys(USERNAME)
-        driver.find_element(By.ID, "Txt_UtIn_Passwo").send_keys(PASSWORD)
-        driver.execute_script(
-            "arguments[0].click();",
-            driver.find_element(By.ID, "Cmd_SingIn"),
-        )
+        campo_id = wait.until(EC.presence_of_element_located((By.ID, "Txt_UtIn_Id")))
+        campo_id.clear()
+        campo_id.send_keys(USERNAME)
+        campo_pw = driver.find_element(By.ID, "Txt_UtIn_Passwo")
+        campo_pw.clear()
+        campo_pw.send_keys(PASSWORD)
+        log.info("URL prima del login: %s", driver.current_url)
+        log.info("Titolo prima del login: %s", driver.title)
+        # Click diretto (non JS) per triggerare correttamente il postback ASP.NET
+        driver.find_element(By.ID, "Cmd_SingIn").click()
 
         log.info("Login inviato. Attesa caricamento dashboard...")
         time.sleep(15)
