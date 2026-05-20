@@ -112,7 +112,11 @@ function getSoci() {
   }
 
   var result = { soci: soci, aggiornato: aggiornato };
-  cache.put(CACHE_KEY, JSON.stringify(result), CACHE_TTL);
+  try {
+    cache.put(CACHE_KEY, JSON.stringify(result), CACHE_TTL);
+  } catch (e) {
+    Logger.log('Cache skip (dati troppo grandi): ' + e);
+  }
   return result;
 }
 
