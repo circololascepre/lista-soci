@@ -321,42 +321,39 @@ def scarica_soci() -> None:
     log.info("Risposta STAMPA LISTA — Content-Type: %s | Content-Disposition: %s", ct, cd)
 
     if not is_file_response(resp):
-        log.info("Risposta HTML (%d bytes) — analisi per trovare link di download...", len(resp.content))
+        log.info("Risposta HTML (%d bytes) — cerco URL file in Pannello_Attesa_AICS...", len(resp.content))
         resp_soup = BeautifulSoup(resp.text, "lxml")
 
-        # Meta-refresh (redirect automatico)
-        meta = resp_soup.find("meta", {"http-equiv": re.compile(r"refresh", re.I)})
-        if meta:
-            content = meta.get("content", "")
-            log.info("Meta-refresh trovato: %r", content)
-            m = re.search(r"url=([^\s;\"']+)", content, re.I)
-            if m:
-                redirect_url = requests.compat.urljoin(current_url, m.group(1))
-                log.info("Seguendo meta-refresh: %s", redirect_url)
-                resp = session.get(redirect_url)
+        # Il server AICS imposta questo campo hidden con l'URL del file generato.
+        # Il JavaScript di pagina lo legge e apre il download; noi lo leggiamo direttamente.
+        campo = resp_soup.find(id="ctl00_Pannello_Attesa_AICS_Pagina_Da_Avviare")
+        if not campo:
+            # Ricerca parziale per sicurezza
+            campo = resp_soup.find(id=re.compile(r"Pagina_Da_Avviare"))
+
+        if campo:
+            url_file = campo.get("value", "").strip()
+            log.info("Pagina_Da_Avviare value=%r", url_file)
+            if url_file:
+                download_url = requests.compat.urljoin(current_url, url_file)
+                log.info("GET file: %s", download_url)
+                resp = session.get(download_url)
                 resp.raise_for_status()
-
-        # Link diretti a file
-        for a in resp_soup.find_all("a", href=True):
-            href = a.get("href", "")
-            if any(x in href.lower() for x in [".xls", ".xlsx", ".csv", "download", "export", "stampa"]):
-                log.info("Link file trovato: href=%r testo=%r", href, a.get_text(strip=True)[:40])
-
-        # Iframe
-        for iframe in resp_soup.find_all("iframe", src=True):
-            log.info("Iframe src=%r", iframe.get("src"))
-
-        # Script con window.location o href a file
-        for script in resp_soup.find_all("script"):
-            txt = script.get_text()
-            if any(x in txt.lower() for x in ["location", ".xls", "download", "window.open"]):
-                log.info("Script con possibile redirect:\n%s", txt[:600])
-
-        # Dump HTML per analisi manuale (utile se non troviamo niente)
-        log.info("Primi 4000 char risposta HTML:\n%s", resp.text[:4000])
+            else:
+                raise RuntimeError(
+                    "Pagina_Da_Avviare trovato ma vuoto: il server non ha generato il file."
+                )
+        else:
+            log.warning("Pagina_Da_Avviare non trovato. IDs hidden inputs: %s",
+                        [i.get("id") for i in resp_soup.find_all("input", {"type": "hidden"}) if i.get("id")])
+            raise RuntimeError("Impossibile trovare il link di download nel pannello attesa AICS.")
 
         if not is_file_response(resp):
-            raise RuntimeError("STAMPA LISTA non ha restituito un file Excel scaricabile.")
+            raise RuntimeError(
+                f"Download da Pagina_Da_Avviare non è un file: "
+                f"Content-Type={resp.headers.get('Content-Type')} "
+                f"Content-Disposition={resp.headers.get('Content-Disposition')}"
+            )
 
     log.info("File ricevuto: %d bytes.", len(resp.content))
     df = leggi_file(resp.content)
