@@ -45,6 +45,10 @@ def crea_driver(download_dir: str) -> webdriver.Chrome:
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-features=InsecureDownloadWarnings")
     opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument(
+        "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+    )
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     opts.add_experimental_option("prefs", {
@@ -187,7 +191,8 @@ def scarica_soci() -> None:
         )
 
         log.info("Login inviato. Attesa caricamento dashboard...")
-        time.sleep(10)
+        time.sleep(15)
+        log.info("URL dopo login: %s", driver.current_url)
 
         log.info("Click su menu SOCI (ctl00_Mnu040)...")
         menu_soci = wait.until(EC.presence_of_element_located((By.ID, "ctl00_Mnu040")))
@@ -278,6 +283,14 @@ def scarica_soci() -> None:
 
     except Exception:
         log.exception("ERRORE DURANTE L'ESECUZIONE")
+        try:
+            screenshot_path = "/tmp/screenshot_errore.png"
+            driver.save_screenshot(screenshot_path)
+            log.info("Screenshot salvato: %s", screenshot_path)
+            log.info("URL al momento dell'errore: %s", driver.current_url)
+            log.info("Titolo pagina: %s", driver.title)
+        except Exception:
+            pass
         try:
             driver.quit()
         except Exception:

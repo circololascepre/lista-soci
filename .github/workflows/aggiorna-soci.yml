@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r scraper/requirements.txt
 
+      - name: Versione Chrome installata
+        run: google-chrome --version || chromium-browser --version || echo "Chrome non trovato in PATH"
+
       - name: Run scraper
         env:
           AICS_USERNAME: ${{ secrets.AICS_USERNAME }}
@@ -41,3 +44,11 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python scraper/soci.py
+
+      - name: Upload screenshot in caso di errore
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-errore
+          path: /tmp/screenshot_errore.png
+          if-no-files-found: ignore
