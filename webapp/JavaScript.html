@@ -1,4 +1,13 @@
 <script>
+/* Rileva larghezza reale (funziona anche dentro iframe Google) */
+(function () {
+  function _sync() {
+    document.documentElement.classList.toggle('is-mobile', window.innerWidth < 700);
+  }
+  _sync();
+  window.addEventListener('resize', _sync);
+}());
+
 'use strict';
 
 var _tuttiSoci     = [];
@@ -110,12 +119,15 @@ function renderCards(soci, totale) {
 
   emptyState.style.display = 'none';
   lista.innerHTML = soci.map(function (s) {
-    var badge  = calcolaBadge(s.scadenza, s.tessera);
+    var badge    = calcolaBadge(s.scadenza, s.tessera);
+    var statoMap = { 'badge-attiva': 'stato-attiva', 'badge-scade': 'stato-scade',
+                     'badge-scaduta': 'stato-scaduta', 'badge-attesa': 'stato-attesa' };
+    var statoClass = statoMap[badge.cls] || '';
     var dateRow = (s.rilascio || s.scadenza)
       ? '<div class="date-row">Rilascio: ' + esc(s.rilascio || '—') + '<span class="date-sep"> &nbsp;·&nbsp; </span>Scadenza: ' + esc(s.scadenza || '—') + '</div>'
       : '';
     return (
-      '<div class="card">' +
+      '<div class="card ' + statoClass + '">' +
         '<div class="card-top">' +
           '<div class="nominativo">' + esc(s.nominativo) + '</div>' +
           '<span class="badge ' + badge.cls + '">' + badge.label + '</span>' +
