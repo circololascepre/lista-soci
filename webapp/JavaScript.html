@@ -2,7 +2,11 @@
 /* Rileva larghezza reale (funziona anche dentro iframe Google) */
 (function () {
   function _sync() {
-    document.documentElement.classList.toggle('is-mobile', window.innerWidth < 700);
+    var w = window.innerWidth;
+    var mobile = w < 1100;
+    document.documentElement.classList.toggle('is-mobile', mobile);
+    var dbg = document.getElementById('dbg-ver');
+    if (dbg) dbg.textContent = 'v17 ' + w + 'px ' + (mobile ? 'MOB' : 'DSK');
   }
   _sync();
   window.addEventListener('resize', _sync);

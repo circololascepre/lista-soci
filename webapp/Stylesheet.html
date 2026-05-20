@@ -327,9 +327,12 @@ body {
 
 /* ================================================================
    LAYOUT MOBILE — applicato via JS (.is-mobile su <html>)
-   Completamente diverso da desktop: card grandi, font grandi,
-   badge sotto il nome, bordo colorato laterale.
+   L'iframe Google rende la pagina a 980px e la scala visivamente
+   a ~390px. zoom: 2.5 inverte questo effetto portando il layout
+   a ~392px effettivi, con font e spaziature normali su telefono.
    ================================================================ */
+
+html.is-mobile { zoom: 2.5; }
 
 .is-mobile body { background: #e8eaed; }
 
