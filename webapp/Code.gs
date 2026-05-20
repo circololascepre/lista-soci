@@ -1,19 +1,23 @@
-var SHEET_NAME = 'Lista Soci';
-var META_SHEET = 'Meta';
-var CACHE_KEY  = 'soci_v2';
-var CACHE_TTL  = 300; // 5 minuti
+var SHEET_NAME    = 'Lista Soci';
+var ACCESSI_SHEET = 'Accessi';
+var META_SHEET    = 'Meta';
+var CACHE_KEY     = 'soci_v2';
+var CACHE_TTL     = 300; // 5 minuti
 
 // ---------------------------------------------------------------------------
 // Entrypoint web app
 // ---------------------------------------------------------------------------
 
 function doGet(e) {
-  var email = Session.getActiveUser().getEmail();
-  var props = PropertiesService.getScriptProperties();
-  var whitelistRaw = props.getProperty('WHITELIST_EMAILS') || '';
-  var whitelist = whitelistRaw.split(',').map(function (s) { return s.trim().toLowerCase(); });
+  var email     = Session.getActiveUser().getEmail();
+  var whitelist = getWhitelist_();
 
-  if (!email || whitelist.indexOf(email.toLowerCase()) === -1) {
+  // Blocca solo se l'email è nota E la whitelist non è vuota E l'email non è presente.
+  // Quando l'email è sconosciuta (stringa vuota) l'accesso è permesso:
+  // con access=ANYONE Google non richiede login, quindi non si può autenticare nessuno.
+  var bloccato = email && whitelist.length > 0 && whitelist.indexOf(email.toLowerCase()) === -1;
+
+  if (bloccato) {
     return HtmlService.createHtmlOutput(
       '<!DOCTYPE html><html lang="it"><head>' +
       '<meta charset="UTF-8">' +
@@ -24,13 +28,12 @@ function doGet(e) {
         'justify-content:center;min-height:100vh;margin:0;background:#f0f2f5;}' +
         '.box{background:#fff;padding:32px 28px;border-radius:16px;' +
         'box-shadow:0 2px 12px rgba(0,0,0,.1);text-align:center;max-width:380px;width:90%;}' +
-        'h2{color:#ef4444;margin:0 0 12px;}' +
-        'p{color:#555;line-height:1.6;margin:0 0 8px;}' +
+        'h2{color:#ef4444;margin:0 0 12px;}p{color:#555;line-height:1.6;margin:0 0 8px;}' +
         'strong{color:#333;}' +
       '</style></head><body>' +
       '<div class="box">' +
         '<h2>Accesso negato</h2>' +
-        '<p>Il tuo account (<strong>' + escHtml_(email || 'sconosciuto') + '</strong>)<br>' +
+        '<p>L\'account <strong>' + escHtml_(email) + '</strong><br>' +
         'non è autorizzato ad accedere a questa applicazione.</p>' +
         '<p>Contatta l\'amministratore per richiedere l\'accesso.</p>' +
       '</div></body></html>'
@@ -52,41 +55,55 @@ function include(filename) {
 }
 
 // ---------------------------------------------------------------------------
+// Legge la whitelist dal foglio "Accessi" (una email per riga, colonna A).
+// Se il foglio non esiste o è vuoto → nessuna restrizione.
+// ---------------------------------------------------------------------------
+
+function getWhitelist_() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var ss    = SpreadsheetApp.openById(props.getProperty('SPREADSHEET_ID'));
+    var sheet = ss.getSheetByName(ACCESSI_SHEET);
+    if (!sheet) return [];
+    var vals = sheet.getDataRange().getValues();
+    return vals
+      .map(function (r) { return String(r[0] || '').trim().toLowerCase(); })
+      .filter(function (e) { return e.indexOf('@') !== -1; });
+  } catch (err) {
+    Logger.log('getWhitelist_ error: ' + err);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Lettura soci con cache 5 minuti
-// Ritorna { soci: [...], aggiornato: "dd/MM/yyyy HH:mm" }
 // ---------------------------------------------------------------------------
 
 function getSoci() {
   var cache  = CacheService.getScriptCache();
   var cached = cache.get(CACHE_KEY);
-  if (cached) {
-    return JSON.parse(cached);
-  }
+  if (cached) return JSON.parse(cached);
 
   var props         = PropertiesService.getScriptProperties();
-  var spreadsheetId = props.getProperty('SPREADSHEET_ID');
-  var ss            = SpreadsheetApp.openById(spreadsheetId);
+  var ss            = SpreadsheetApp.openById(props.getProperty('SPREADSHEET_ID'));
   var sheet         = ss.getSheetByName(SHEET_NAME);
   var data          = sheet.getDataRange().getValues();
 
-  // Leggi timestamp dal foglio Meta (scritto dallo scraper Python)
   var aggiornato = '';
   try {
     var metaSheet = ss.getSheetByName(META_SHEET);
     if (metaSheet) {
       aggiornato = String(metaSheet.getRange('A1').getValue() || '').trim();
     }
-  } catch (e) {
-    Logger.log('Meta sheet non trovato: ' + e);
-  }
+  } catch (e) { Logger.log('Meta sheet: ' + e); }
 
   var soci = [];
   for (var i = 1; i < data.length; i++) {
-    var row       = data[i];
-    var nominativo = String(row[0] || '').trim();
-    if (!nominativo) continue;
+    var row = data[i];
+    var nom = String(row[0] || '').trim();
+    if (!nom) continue;
     soci.push({
-      nominativo: nominativo,
+      nominativo: nom,
       tessera:    String(row[1] || '').trim(),
       tipo:       String(row[2] || '').trim(),
       rilascio:   String(row[3] || '').trim(),
@@ -108,38 +125,29 @@ function triggerAggiornamento() {
   var token    = props.getProperty('GITHUB_TOKEN');
   var repo     = props.getProperty('GITHUB_REPO');
   var workflow = props.getProperty('WORKFLOW_FILE');
-  var url      = 'https://api.github.com/repos/' + repo + '/actions/workflows/' + workflow + '/dispatches';
-
+  var url      = 'https://api.github.com/repos/' + repo +
+                 '/actions/workflows/' + workflow + '/dispatches';
   try {
     var response = UrlFetchApp.fetch(url, {
-      method:             'POST',
-      muteHttpExceptions: true,
+      method: 'POST', muteHttpExceptions: true,
       headers: {
-        'Authorization':        'Bearer ' + token,
-        'Accept':               'application/vnd.github+json',
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
-        'Content-Type':         'application/json'
+        'Content-Type': 'application/json'
       },
       payload: JSON.stringify({ ref: 'main' })
     });
-
     var code = response.getResponseCode();
-    if (code === 204) {
-      return { ok: true, message: 'Workflow avviato.' };
-    }
-
-    var body = response.getContentText();
-    Logger.log('GitHub dispatch error ' + code + ': ' + body);
-    return { ok: false, message: 'Errore GitHub (HTTP ' + code + '): ' + body };
-
+    if (code === 204) return { ok: true, message: 'Workflow avviato.' };
+    return { ok: false, message: 'Errore GitHub (HTTP ' + code + '): ' + response.getContentText() };
   } catch (e) {
-    Logger.log('triggerAggiornamento exception: ' + e);
     return { ok: false, message: 'Errore di rete: ' + e.toString() };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Polling stato workflow (chiamato dal client ogni 5s dopo il dispatch)
+// Polling stato workflow
 // ---------------------------------------------------------------------------
 
 function getWorkflowStatus() {
@@ -150,38 +158,23 @@ function getWorkflowStatus() {
   var url      = 'https://api.github.com/repos/' + repo +
                  '/actions/workflows/' + workflow +
                  '/runs?per_page=1&event=workflow_dispatch';
-
   try {
     var resp = UrlFetchApp.fetch(url, {
       muteHttpExceptions: true,
       headers: {
-        'Authorization':        'Bearer ' + token,
-        'Accept':               'application/vnd.github+json',
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28'
       }
     });
-
     var code = resp.getResponseCode();
-    if (code !== 200) {
-      Logger.log('getWorkflowStatus HTTP ' + code + ': ' + resp.getContentText());
-      return { status: 'error', message: 'Errore GitHub API (HTTP ' + code + ').' };
-    }
-
+    if (code !== 200) return { status: 'error', message: 'Errore GitHub API (HTTP ' + code + ').' };
     var runs = JSON.parse(resp.getContentText()).workflow_runs;
-    if (!runs || runs.length === 0) {
-      return { status: 'queued', message: 'In attesa di avvio...' };
-    }
-
+    if (!runs || runs.length === 0) return { status: 'queued', message: 'In attesa di avvio...' };
     var run = runs[0];
-    return {
-      status:     run.status,
-      conclusion: run.conclusion,
-      runUrl:     run.html_url,
-      message:    messaggioStato_(run.status, run.conclusion)
-    };
-
+    return { status: run.status, conclusion: run.conclusion, runUrl: run.html_url,
+             message: messaggioStato_(run.status, run.conclusion) };
   } catch (e) {
-    Logger.log('getWorkflowStatus exception: ' + e);
     return { status: 'error', message: 'Errore di rete: ' + e.toString() };
   }
 }
@@ -199,7 +192,7 @@ function messaggioStato_(status, conclusion) {
 }
 
 // ---------------------------------------------------------------------------
-// Email utente corrente (mostrata nel footer)
+// Email utente corrente
 // ---------------------------------------------------------------------------
 
 function getUserEmail() {
@@ -212,8 +205,6 @@ function getUserEmail() {
 
 function escHtml_(s) {
   return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

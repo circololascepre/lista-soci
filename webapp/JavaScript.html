@@ -5,6 +5,7 @@ var _tuttiSoci     = [];
 var _debounceTimer = null;
 var _pollTimer     = null;
 var _inProgressCnt = 0;
+var _filtroAttivo  = 'tutte';
 
 /* ---- Avvio ---- */
 
@@ -52,17 +53,39 @@ function caricaSoci() {
     .getSoci();
 }
 
-/* ---- Filtro ---- */
+/* ---- Filtro testo ---- */
 
 function filtra(query) {
   var q = query.toLowerCase().trim();
-  var filtrati = !q
-    ? _tuttiSoci
-    : _tuttiSoci.filter(function (s) {
-        var campi = [s.nominativo, s.tessera, s.tipo, s.rilascio, s.scadenza].join(' ').toLowerCase();
-        return campi.indexOf(q) !== -1;
-      });
-  renderCards(filtrati, _tuttiSoci.length);
+  var risultati = _tuttiSoci.filter(function (s) {
+    var testoOk = !q || [s.nominativo, s.tessera, s.tipo, s.rilascio, s.scadenza]
+      .join(' ').toLowerCase().indexOf(q) !== -1;
+    var badgeOk = _filtroAttivo === 'tutte' || calcolaBadge(s.scadenza, s.tessera).cls === _filtroAttivo;
+    return testoOk && badgeOk;
+  });
+  renderCards(risultati, _tuttiSoci.length);
+}
+
+/* ---- Filtro badge ---- */
+
+function filtraBadge(tipo) {
+  _filtroAttivo = tipo;
+
+  // Aggiorna stile bottoni
+  var ids = ['f-tutte', 'f-attive', 'f-scade', 'f-scadute', 'f-attesa'];
+  var vals = ['tutte', 'badge-attiva', 'badge-scade', 'badge-scaduta', 'badge-attesa'];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) {
+      if (vals[i] === tipo) {
+        el.classList.add('btn-filtro-attivo');
+      } else {
+        el.classList.remove('btn-filtro-attivo');
+      }
+    }
+  }
+
+  filtra(document.getElementById('search').value);
 }
 
 /* ---- Rendering ---- */

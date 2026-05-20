@@ -23,6 +23,13 @@
         >
       </div>
       <p id="ultimo-aggiornamento" class="ultimo-aggiornamento"></p>
+      <div class="filtri-wrap">
+        <button class="btn-filtro btn-filtro-attivo" onclick="filtraBadge('tutte')" id="f-tutte">Tutte</button>
+        <button class="btn-filtro" onclick="filtraBadge('badge-attiva')" id="f-attive">Attive</button>
+        <button class="btn-filtro" onclick="filtraBadge('badge-scade')" id="f-scade">In scadenza</button>
+        <button class="btn-filtro" onclick="filtraBadge('badge-scaduta')" id="f-scadute">Scadute</button>
+        <button class="btn-filtro" onclick="filtraBadge('badge-attesa')" id="f-attesa">In attesa</button>
+      </div>
       <div class="toolbar">
         <span id="contatore" class="contatore">Caricamento...</span>
         <button id="btn-aggiorna" class="btn-aggiorna" onclick="aggiorna()">Aggiorna ↻</button>
