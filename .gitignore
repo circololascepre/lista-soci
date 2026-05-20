@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.env
+
+# Credenziali Google - escludi per nome specifico
+*service-account*.json
+*credentials*.json
+script-invio-mail-tesserati-c310430e3eff.json
+
+# Download e file temporanei
+*.xlsx
+*.xls
+*.csv
+*.crdownload
+*.tmp
+
+# File originale con credenziali hardcoded (tenuto solo in locale)
+/soci.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

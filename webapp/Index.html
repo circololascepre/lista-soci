@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <base target="_top">
+  <?!= include('Stylesheet') ?>
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="header-inner">
+      <h1 class="app-title">Lista Soci</h1>
+      <div class="search-wrap">
+        <input
+          type="search"
+          id="search"
+          placeholder="Cerca per nome, tessera, tipo..."
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+        >
+      </div>
+      <div class="toolbar">
+        <span id="contatore" class="contatore">Caricamento...</span>
+        <button id="btn-aggiorna" class="btn-aggiorna" onclick="aggiorna()">Aggiorna ↻</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="lista"></div>
+    <div id="empty-state" class="empty-state" style="display:none">
+      <p>Nessun risultato</p>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <span id="footer-email"></span>
+    <span id="footer-timestamp"></span>
+  </footer>
+
+  <?!= include('JavaScript') ?>
+
+</body>
+</html>

@@ -1,0 +1,148 @@
+<script>
+'use strict';
+
+var _tuttiSoci    = [];
+var _debounceTimer = null;
+
+/* ---- Avvio ---- */
+
+document.addEventListener('DOMContentLoaded', function () {
+  google.script.run
+    .withSuccessHandler(function (email) {
+      document.getElementById('footer-email').textContent = email || '';
+    })
+    .getUserEmail();
+
+  caricaSoci();
+
+  document.getElementById('search').addEventListener('input', function () {
+    clearTimeout(_debounceTimer);
+    var q = this.value;
+    _debounceTimer = setTimeout(function () { filtra(q); }, 100);
+  });
+});
+
+/* ---- Caricamento dati ---- */
+
+function caricaSoci() {
+  document.getElementById('lista').innerHTML =
+    '<p style="padding:32px;text-align:center;color:#aaa">Caricamento in corso...</p>';
+
+  google.script.run
+    .withSuccessHandler(function (soci) {
+      _tuttiSoci = soci;
+      document.getElementById('footer-timestamp').textContent =
+        'Dati alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+      renderCards(soci, soci.length);
+    })
+    .withFailureHandler(function (err) {
+      document.getElementById('lista').innerHTML =
+        '<p style="padding:32px;text-align:center;color:#ef4444">Errore nel caricamento dei dati.</p>';
+      console.error(err);
+    })
+    .getSoci();
+}
+
+/* ---- Filtro ---- */
+
+function filtra(query) {
+  var q = query.toLowerCase().trim();
+  var filtrati = !q
+    ? _tuttiSoci
+    : _tuttiSoci.filter(function (s) {
+        var campi = [s.nominativo, s.tessera, s.tipo, s.rilascio, s.scadenza].join(' ').toLowerCase();
+        return campi.indexOf(q) !== -1;
+      });
+  renderCards(filtrati, _tuttiSoci.length);
+}
+
+/* ---- Rendering ---- */
+
+function renderCards(soci, totale) {
+  document.getElementById('contatore').textContent = soci.length + ' di ' + totale;
+
+  var emptyState = document.getElementById('empty-state');
+  var lista      = document.getElementById('lista');
+
+  if (soci.length === 0) {
+    lista.innerHTML        = '';
+    emptyState.style.display = '';
+    return;
+  }
+
+  emptyState.style.display = 'none';
+  lista.innerHTML = soci.map(function (s) {
+    var badge = calcolaBadge(s.scadenza, s.tessera);
+    var dateRow = (s.rilascio || s.scadenza)
+      ? '<div class="date-row">Rilascio: ' + esc(s.rilascio || '—') + ' &nbsp;·&nbsp; Scadenza: ' + esc(s.scadenza || '—') + '</div>'
+      : '';
+    return (
+      '<div class="card">' +
+        '<div class="card-top">' +
+          '<div class="nominativo">' + esc(s.nominativo) + '</div>' +
+          '<span class="badge ' + badge.cls + '">' + badge.label + '</span>' +
+        '</div>' +
+        '<div class="tessera">' + (s.tessera ? '# ' + esc(s.tessera) : '—') + '</div>' +
+        '<div class="tipo">' + esc(s.tipo || '—') + '</div>' +
+        dateRow +
+      '</div>'
+    );
+  }).join('');
+}
+
+/* ---- Badge stato ---- */
+
+function calcolaBadge(scadenza, tessera) {
+  if (!tessera) {
+    return { cls: 'badge-attesa', label: 'In attesa rinnovo' };
+  }
+  if (!scadenza) {
+    return { cls: 'badge-attiva', label: 'Attiva' };
+  }
+
+  var parti = scadenza.split('/');
+  if (parti.length !== 3) {
+    return { cls: 'badge-attiva', label: 'Attiva' };
+  }
+
+  var dataScad = new Date(parseInt(parti[2], 10), parseInt(parti[1], 10) - 1, parseInt(parti[0], 10));
+  var oggi = new Date();
+  oggi.setHours(0, 0, 0, 0);
+  var giorniRimasti = Math.floor((dataScad - oggi) / 86400000);
+
+  if (giorniRimasti < 0)  return { cls: 'badge-scaduta', label: 'Scaduta' };
+  if (giorniRimasti <= 30) return { cls: 'badge-scade',   label: 'Scade tra ' + giorniRimasti + ' gg' };
+  return { cls: 'badge-attiva', label: 'Attiva' };
+}
+
+/* ---- Aggiornamento manuale ---- */
+
+function aggiorna() {
+  var btn = document.getElementById('btn-aggiorna');
+  btn.textContent = 'In corso...';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function (res) {
+      btn.textContent = 'Aggiorna ↻';
+      btn.disabled    = false;
+      alert(res.message);
+    })
+    .withFailureHandler(function (err) {
+      btn.textContent = 'Aggiorna ↻';
+      btn.disabled    = false;
+      alert('Errore imprevisto: ' + (err.message || err));
+    })
+    .triggerAggiornamento();
+}
+
+/* ---- Utilità ---- */
+
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
