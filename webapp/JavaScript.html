@@ -55,12 +55,19 @@ function caricaSoci() {
 
 /* ---- Filtro testo ---- */
 
+// "Scadute" include anche badge-attesa (in attesa di rinnovo)
+var _gruppiFiltro = {
+  'badge-scaduta': ['badge-scaduta', 'badge-attesa']
+};
+
 function filtra(query) {
   var q = query.toLowerCase().trim();
+  var gruppo = _gruppiFiltro[_filtroAttivo] || [_filtroAttivo];
   var risultati = _tuttiSoci.filter(function (s) {
     var testoOk = !q || [s.nominativo, s.tessera, s.tipo, s.rilascio, s.scadenza]
       .join(' ').toLowerCase().indexOf(q) !== -1;
-    var badgeOk = _filtroAttivo === 'tutte' || calcolaBadge(s.scadenza, s.tessera).cls === _filtroAttivo;
+    var badgeOk = _filtroAttivo === 'tutte' ||
+      gruppo.indexOf(calcolaBadge(s.scadenza, s.tessera).cls) !== -1;
     return testoOk && badgeOk;
   });
   renderCards(risultati, _tuttiSoci.length);
@@ -71,9 +78,8 @@ function filtra(query) {
 function filtraBadge(tipo) {
   _filtroAttivo = tipo;
 
-  // Aggiorna stile bottoni
-  var ids = ['f-tutte', 'f-attive', 'f-scade', 'f-scadute', 'f-attesa'];
-  var vals = ['tutte', 'badge-attiva', 'badge-scade', 'badge-scaduta', 'badge-attesa'];
+  var ids  = ['f-tutte', 'f-attive', 'f-scade', 'f-scadute'];
+  var vals = ['tutte', 'badge-attiva', 'badge-scade', 'badge-scaduta'];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
     if (el) {
@@ -140,7 +146,7 @@ function calcolaBadge(scadenza, tessera) {
   oggi.setHours(0, 0, 0, 0);
   var gg = Math.floor((dataScad - oggi) / 86400000);
   if (gg < 0)   return { cls: 'badge-scaduta', label: 'Scaduta' };
-  if (gg <= 30) return { cls: 'badge-scade',   label: 'Scade tra ' + gg + ' gg' };
+  if (gg <= 15) return { cls: 'badge-scade',   label: 'Scade tra ' + gg + ' gg' };
   return { cls: 'badge-attiva', label: 'Attiva' };
 }
 
