@@ -112,7 +112,7 @@ function renderCards(soci, totale) {
   lista.innerHTML = soci.map(function (s) {
     var badge  = calcolaBadge(s.scadenza, s.tessera);
     var dateRow = (s.rilascio || s.scadenza)
-      ? '<div class="date-row">Rilascio: ' + esc(s.rilascio || '—') + ' &nbsp;·&nbsp; Scadenza: ' + esc(s.scadenza || '—') + '</div>'
+      ? '<div class="date-row">Rilascio: ' + esc(s.rilascio || '—') + '<span class="date-sep"> &nbsp;·&nbsp; </span>Scadenza: ' + esc(s.scadenza || '—') + '</div>'
       : '';
     return (
       '<div class="card">' +
@@ -150,9 +150,47 @@ function calcolaBadge(scadenza, tessera) {
   return { cls: 'badge-attiva', label: 'Attiva' };
 }
 
+/* ---- Rate limiting aggiornamento (5/giorno, reset mezzanotte) ---- */
+
+var LIMITE_GIORNALIERO = 5;
+var LS_KEY_COUNT = 'aggiorna_count';
+var LS_KEY_DATE  = 'aggiorna_date';
+
+function _oggiString() {
+  var d = new Date();
+  return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+}
+
+function _leggiContatore() {
+  var oggi = _oggiString();
+  try {
+    var dataLS = localStorage.getItem(LS_KEY_DATE);
+    if (dataLS !== oggi) return 0;
+    return parseInt(localStorage.getItem(LS_KEY_COUNT) || '0', 10);
+  } catch (e) { return 0; }
+}
+
+function _incrementaContatore() {
+  try {
+    var oggi = _oggiString();
+    localStorage.setItem(LS_KEY_DATE, oggi);
+    var n = _leggiContatore() + 1;
+    localStorage.setItem(LS_KEY_COUNT, String(n));
+    return n;
+  } catch (e) { return 1; }
+}
+
 /* ---- Aggiornamento con barra di avanzamento ---- */
 
 function aggiorna() {
+  var usati = _leggiContatore();
+  if (usati >= LIMITE_GIORNALIERO) {
+    _mostraModal();
+    _setProgress(100, 'Limite giornaliero raggiunto (' + LIMITE_GIORNALIERO + '/' + LIMITE_GIORNALIERO + ').\nRiprova domani dopo le 00:00.', true, true);
+    return;
+  }
+
+  _incrementaContatore();
   _mostraModal();
   _setProgress(0, 'Avvio aggiornamento...', false, false);
 

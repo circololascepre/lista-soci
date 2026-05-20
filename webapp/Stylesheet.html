@@ -328,8 +328,41 @@ body {
 /* ---- Mobile ---- */
 
 @media (max-width: 640px) {
-  .header-inner { padding: 10px 12px 6px; }
-  .container    { padding: 12px; }
-  .nominativo   { font-size: 16px; }
+  .header-inner  { padding: 10px 12px 6px; }
+  .container     { padding: 10px; }
+
+  /* Filtri: scorrimento orizzontale invece di andare a capo */
+  .filtri-wrap {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    margin-bottom: 6px;
+  }
+  .filtri-wrap::-webkit-scrollbar { display: none; }
+  .btn-filtro { flex-shrink: 0; font-size: 13px; padding: 7px 14px; }
+
+  /* Card */
+  .card { padding: 14px 12px; border-radius: 10px; margin-bottom: 10px; }
+
+  /* Nominativo + badge: badge va sotto se il nome è lungo */
+  .card-top { flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+  .nominativo { font-size: 17px; }
+  .badge { font-size: 12px; padding: 4px 10px; }
+
+  /* Dettagli */
+  .tessera { font-size: 15px; margin-bottom: 5px; }
+  .tipo    { font-size: 14px; margin-bottom: 5px; }
+
+  /* Date: una per riga */
+  .date-row {
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #999;
+  }
+  .date-sep { display: none; }
 }
 </style>
