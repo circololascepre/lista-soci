@@ -53,10 +53,14 @@ def crea_driver(download_dir: str) -> uc.Chrome:
     if chrome_bin:
         log.info("Chrome binary: %s", chrome_bin)
 
+    # Su Windows self-hosted la variabile CI non è impostata → headless=False va bene.
+    # Su GitHub-hosted (Linux + Xvfb) forziamo headless=False perché il display virtuale è disponibile.
+    # Se serve headless esplicito, impostare FORCE_HEADLESS=1 nell'env.
+    force_headless = os.environ.get("FORCE_HEADLESS", "0") == "1"
     driver = uc.Chrome(
         options=opts,
         browser_executable_path=chrome_bin if chrome_bin else None,
-        headless=False,
+        headless=force_headless,
     )
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {
         "behavior": "allow",
