@@ -1,7 +1,7 @@
 var SHEET_NAME    = 'Lista Soci';
 var ACCESSI_SHEET = 'Accessi';
 var META_SHEET    = 'Meta';
-var CACHE_KEY     = 'soci_v3';
+var CACHE_KEY     = 'soci_v4';
 var CACHE_TTL     = 300; // 5 minuti
 
 // ---------------------------------------------------------------------------
@@ -71,11 +71,16 @@ function getSoci() {
 
   var aggiornato = '';
   try {
-    var metaSheet = ss.getSheetByName(META_SHEET);
-    if (metaSheet) {
-      aggiornato = String(metaSheet.getRange('A1').getValue() || '').trim();
-    }
-  } catch (e) { Logger.log('Meta sheet: ' + e); }
+    var file = DriveApp.getFileById(props.getProperty('SPREADSHEET_ID'));
+    aggiornato = Utilities.formatDate(file.getLastUpdated(), 'Europe/Rome', 'dd/MM/yyyy HH:mm');
+  } catch (e) {
+    Logger.log('DriveApp.getLastUpdated error: ' + e);
+    // Fallback: foglio Meta scritto dallo scraper
+    try {
+      var metaSheet = ss.getSheetByName(META_SHEET);
+      if (metaSheet) aggiornato = String(metaSheet.getRange('A1').getValue() || '').trim();
+    } catch (e2) { Logger.log('Meta sheet fallback: ' + e2); }
+  }
 
   var soci = [];
   for (var i = 1; i < data.length; i++) {

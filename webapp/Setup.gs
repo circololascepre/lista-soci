@@ -31,3 +31,26 @@ function setupProperties() {
 
   Logger.log('Proprietà configurate correttamente.');
 }
+
+/**
+ * Imposta il trigger giornaliero alle 03:00 (fuso Europe/Rome).
+ * Esegui UNA SOLA VOLTA manualmente dall'editor: Esegui → impostaTriggerNotturno
+ * Puoi verificarlo in: Triggers (orologio in basso a sinistra nell'editor).
+ */
+function impostaTriggerNotturno() {
+  // Rimuovi trigger esistenti per evitare duplicati
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'triggerAggiornamento') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  // Trigger giornaliero alle 03:00–04:00 ora italiana (fuso del progetto: Europe/Rome)
+  ScriptApp.newTrigger('triggerAggiornamento')
+    .timeBased()
+    .atHour(3)
+    .everyDays(1)
+    .create();
+
+  Logger.log('Trigger notturno impostato: triggerAggiornamento si attiva ogni notte tra le 03:00 e le 04:00 (ora italiana).');
+}
