@@ -204,9 +204,16 @@ body {
 .date-row {
   font-size: 12px;
   color: #bbb;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
-.date-sep { display: inline; }
+.date-row span + span::before {
+  content: '·';
+  color: #ddd;
+}
 
 /* ---- Login overlay ---- */
 
@@ -493,23 +500,25 @@ html.is-mobile { zoom: 2.5; }
 .is-mobile .tessera {
   font-size: 20px;
   margin-bottom: 8px;
-  color: #333;
+  color: #222;
 }
 
 .is-mobile .tipo {
   font-size: 17px;
   margin-bottom: 8px;
-  color: #777;
+  color: #555;
 }
 
 .is-mobile .date-row {
   font-size: 16px;
-  color: #999;
-  display: flex;
+  color: #777;
   flex-direction: column;
-  gap: 4px;
-  line-height: 1.4;
+  gap: 5px;
+  line-height: 1.5;
 }
 
-.is-mobile .date-sep { display: none; }
+.is-mobile .date-row span + span::before {
+  content: '';
+  margin: 0;
+}
 </style>

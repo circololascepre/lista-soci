@@ -123,9 +123,13 @@ function renderCards(soci, totale) {
     var statoMap = { 'badge-attiva': 'stato-attiva', 'badge-scade': 'stato-scade',
                      'badge-scaduta': 'stato-scaduta', 'badge-attesa': 'stato-attesa' };
     var statoClass = statoMap[badge.cls] || '';
-    var dateRow = (s.rilascio || s.scadenza)
-      ? '<div class="date-row">Rilascio: ' + esc(s.rilascio || '—') + '<span class="date-sep"> &nbsp;·&nbsp; </span>Scadenza: ' + esc(s.scadenza || '—') + '</div>'
-      : '';
+    var dateRow = '';
+    if (s.rilascio || s.scadenza) {
+      dateRow = '<div class="date-row">' +
+        '<span>Rilascio:&nbsp; ' + esc(s.rilascio || '—') + '</span>' +
+        '<span>Scadenza: ' + esc(s.scadenza || '—') + '</span>' +
+        '</div>';
+    }
     return (
       '<div class="card ' + statoClass + '">' +
         '<div class="card-top">' +
