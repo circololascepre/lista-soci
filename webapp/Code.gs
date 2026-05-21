@@ -1,7 +1,7 @@
 var SHEET_NAME    = 'Lista Soci';
 var ACCESSI_SHEET = 'Accessi';
 var META_SHEET    = 'Meta';
-var CACHE_KEY     = 'soci_v2';
+var CACHE_KEY     = 'soci_v3';
 var CACHE_TTL     = 300; // 5 minuti
 
 // ---------------------------------------------------------------------------
@@ -86,8 +86,8 @@ function getSoci() {
       nominativo: nom,
       tessera:    String(row[1] || '').trim(),
       tipo:       String(row[2] || '').trim(),
-      rilascio:   String(row[3] || '').trim(),
-      scadenza:   String(row[4] || '').trim()
+      rilascio:   formatData_(row[3]),
+      scadenza:   formatData_(row[4])
     });
   }
 
@@ -184,8 +184,23 @@ function getUserEmail() {
 }
 
 // ---------------------------------------------------------------------------
-// Utilità interna
+// Utilità interne
 // ---------------------------------------------------------------------------
+
+function formatData_(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Europe/Rome', 'dd/MM/yyyy');
+  }
+  var s = String(val).trim();
+  if (!s || s === 'NaN' || s === 'undefined' || s === 'null') return '';
+  // Se la stringa contiene spazio o T (es. "2024-01-15 00:00:00" o ISO), prendi solo la parte data
+  s = s.split(' ')[0].split('T')[0];
+  // Converti YYYY-MM-DD → DD/MM/YYYY se necessario
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return iso[3] + '/' + iso[2] + '/' + iso[1];
+  return s;
+}
 
 function escHtml_(s) {
   return String(s)
