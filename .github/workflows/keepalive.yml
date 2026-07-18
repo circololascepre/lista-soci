@@ -1,0 +1,31 @@
+name: Keepalive (mantieni workflow attivi)
+
+# GitHub disabilita automaticamente i workflow schedulati dopo 60 giorni
+# di inattivita' del repository (nessun commit da parte di una persona).
+# Gli scraper girano ogni giorno ma NON fanno commit qui, quindi il repo
+# risulta "inattivo". Questo workflow fa un commit vuoto due volte al mese
+# per far ripartire il timer e non far mai disabilitare le schedule.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Alle 05:00 del 1 e del 15 di ogni mese (~ogni 2 settimane),
+    # ben entro i 60 giorni di inattivita'.
+    - cron: "0 5 1,15 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Commit vuoto per mantenere il repository attivo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive workflow schedulati [skip ci]"
+          git push
